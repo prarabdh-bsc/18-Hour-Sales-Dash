@@ -8,6 +8,7 @@ import threading
 from typing import Dict, Any, Tuple, List
 from config import config
 from utils import format_indian_currency, get_state_coordinates
+import plotly.express as px
 
 GRAPHQL_ENDPOINT = config.GRAPHQL_ENDPOINT
 HEADERS = config.HEADERS
@@ -377,9 +378,9 @@ def get_unique_customers_count(start_iso: str, end_iso: str) -> int:
 
     return len(customers)
 
-def get_top_skus_improved(start_iso: str, end_iso: str, target_tags: List[str]) -> List[Tuple[str, int]]:
-    """Get top SKUs with proper pagination using GraphQL"""
-    sku_counts = {}
+def get_top_skus_improved(start_iso: str, end_iso: str, target_tags: List[str]) -> List[Tuple[str, int, float]]:
+    """Get top SKUs with quantity and revenue data, sorted by revenue"""
+    sku_data = {}  # Changed to store both quantity and revenue
     tag_query = " OR ".join(f"tag:{t}" for t in target_tags)
     date_query = f"created_at:>'{start_iso}' AND created_at:<='{end_iso}'"
     paid_query = "financial_status:paid"
@@ -405,6 +406,7 @@ def get_top_skus_improved(start_iso: str, end_iso: str, target_tags: List[str]) 
                         node {{
                           sku
                           quantity
+                          originalTotalSet {{ shopMoney {{ amount }} }}
                         }}
                       }}
                     }}
@@ -424,7 +426,13 @@ def get_top_skus_improved(start_iso: str, end_iso: str, target_tags: List[str]) 
                     item = item_edge["node"]
                     sku = item.get("sku") or "UNKNOWN"
                     qty = int(item.get("quantity", 1))
-                    sku_counts[sku] = sku_counts.get(sku, 0) + qty
+                    revenue = float(item.get("originalTotalSet", {}).get("shopMoney", {}).get("amount", 0))
+                    
+                    if sku not in sku_data:
+                        sku_data[sku] = {"quantity": 0, "revenue": 0.0}
+                    
+                    sku_data[sku]["quantity"] += qty
+                    sku_data[sku]["revenue"] += revenue
 
             if not data["pageInfo"]["hasNextPage"]:
                 break
@@ -434,7 +442,13 @@ def get_top_skus_improved(start_iso: str, end_iso: str, target_tags: List[str]) 
             st.error(f"Error fetching SKU data: {str(e)}")
             break
 
-    top_10 = sorted(sku_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    # Sort by revenue (descending) and return top 10
+    top_10 = sorted(
+        [(sku, data["quantity"], data["revenue"]) for sku, data in sku_data.items()],
+        key=lambda x: x[2],  # Sort by revenue (index 2)
+        reverse=True
+    )[:10]
+    
     return top_10
 
 def fetch_geographic_data(start_iso: str, end_iso: str, target_tags: List[str]) -> Dict[str, Any]:
@@ -691,7 +705,7 @@ def fetch_main_metrics() -> Dict[str, Any]:
         }
 
 def fetch_sku_metrics() -> Dict[str, Any]:
-    """Fetch SKU data separately"""
+    """Fetch SKU data with revenue information"""
     try:
         start_iso, end_iso, now_ist = get_timeframe()
         top_skus = get_top_skus_improved(start_iso, end_iso, TARGET_TAGS)
@@ -1029,6 +1043,88 @@ def main():
     else:
         st.warning("Customer segmentation data loading...")
 
+    # Top SKUs section
+    st.markdown("---")
+    st.markdown('<div class="section-header">Product Performance</div>', unsafe_allow_html=True)
+
+    if sku_data and sku_data.get("success") and sku_data['top_skus']:
+        # Create DataFrame with SKU, Quantity, and Revenue
+        sku_df = pd.DataFrame(sku_data['top_skus'], columns=["SKU", "Quantity", "Revenue"])
+        
+        # Format revenue for display
+        sku_df_display = sku_df.copy()
+        sku_df_display["Revenue"] = sku_df_display["Revenue"].apply(format_indian_currency)
+        sku_df_display.index = range(1, len(sku_df_display) + 1)
+        
+        # Display table
+        st.markdown("### Top 10 SKUs by Revenue")
+        st.dataframe(sku_df_display, use_container_width=True)
+        
+        # Summary statistics
+        total_quantity = sku_df['Quantity'].sum()
+        total_revenue = sku_df['Revenue'].sum()
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info(f"Total Quantity (Top 10): {total_quantity:,} units")
+        with col2:
+            st.info(f"Total Revenue (Top 10): {format_indian_currency(total_revenue)}")
+        
+        # 4. ADD VISUALIZATION CHART
+        st.markdown("### SKU Performance Analysis")
+        
+        # Prepare data for charts
+        chart_data = sku_df.head(10).copy()  # Top 10 for better readability
+        
+        # Create two columns for different chart views
+        chart_col1, chart_col2 = st.columns(2)
+        
+        with chart_col1:
+            st.markdown("#### Revenue by SKU")
+            # Bar chart for revenue
+            revenue_chart = chart_data.set_index("SKU")["Revenue"]
+            st.bar_chart(revenue_chart, height=400)
+        
+        with chart_col2:
+            st.markdown("#### Quantity vs Revenue")
+            # Scatter plot to show relationship
+            import plotly.express as px
+            
+            fig = px.scatter(
+                chart_data, 
+                x="Quantity", 
+                y="Revenue",
+                hover_data=["SKU"],
+                title="SKU Performance: Quantity vs Revenue",
+                labels={"Quantity": "Units Sold", "Revenue": "Revenue (₹)"}
+            )
+            
+            # Customize the chart
+            fig.update_traces(
+                marker=dict(size=10, color='rgba(102, 126, 234, 0.8)', line=dict(width=2, color='white'))
+            )
+            fig.update_layout(
+                height=400,
+                showlegend=False,
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Alternative simpler chart if plotly doesn't work
+        # st.markdown("#### Quantity Distribution")
+        # quantity_chart = chart_data.set_index("SKU")["Quantity"]
+        # st.bar_chart(quantity_chart, height=300)
+        
+    elif sku_data and not sku_data.get("success"):
+        st.error(f"SKU Data Error: {sku_data.get('error', 'Unknown error')}")
+        if st.button("Retry SKU Data", key="retry_sku_button"):
+            st.session_state.sku_data = None
+            st.session_state.last_sku_update = None
+            st.rerun()
+    else:
+        st.warning("SKU data loading...")
+
     # Geographic Analysis Section
     st.markdown("---")
     st.markdown('<div class="section-header">Geographic Analysis</div>', unsafe_allow_html=True)
@@ -1087,16 +1183,8 @@ def main():
                 
                 with col_map3:
                     total_map_revenue = sum(loc["revenue"] for loc in order_locations)
-                    st.info(f"💰 **{format_indian_currency(total_map_revenue)}** from mapped orders")
+                    st.info(f"💰 **{format_indian_currency(total_map_revenue)}** from mapped orders")               
                 
-                # Show sample locations table
-                st.markdown("#### 📋 Sample Order Locations")
-                sample_locations = pd.DataFrame(order_locations[:10])  # Show first 10
-                sample_locations_display = sample_locations.copy()
-                sample_locations_display["revenue"] = sample_locations_display["revenue"].apply(format_indian_currency)
-                sample_locations_display = sample_locations_display[["order_id", "city", "state", "revenue", "quantity"]]
-                sample_locations_display.columns = ["Order ID", "City", "State", "Revenue", "Quantity"]
-                st.dataframe(sample_locations_display, use_container_width=True)
                 
             else:
                 st.warning("🗺️ No order locations with coordinates found. This could mean:")
@@ -1136,34 +1224,14 @@ def main():
         else:
             st.warning("No geographic data available yet.")
     else:
-        st.warning("State performance data loading...")
-
-    # Top SKUs section
-    st.markdown("---")
-    st.markdown('<div class="section-header">Product Performance</div>', unsafe_allow_html=True)
-    
-    if sku_data and sku_data.get("success") and sku_data['top_skus']:
-        sku_df = pd.DataFrame(sku_data['top_skus'], columns=["SKU", "Quantity Sold"])
-        sku_df.index = range(1, len(sku_df) + 1)
-        st.dataframe(sku_df, use_container_width=True)
-        
-        total_quantity = sum(qty for _, qty in sku_data['top_skus'])
-        st.info(f"Total quantity in top 10 SKUs: {total_quantity:,} units")
-    elif sku_data and not sku_data.get("success"):
-        st.error(f"SKU Data Error: {sku_data.get('error', 'Unknown error')}")
-        if st.button("🔄 Retry SKU Data", key="retry_sku_button"):
-            st.session_state.sku_data = None
-            st.session_state.last_sku_update = None
-            st.rerun()
-    else:
-        st.warning("SKU data loading...")
+        st.warning("State performance data loading...")    
 
     # Timestamp
     st.markdown(
         f'<div class="last-updated">Last updated: {main_data["now_ist"].strftime("%I:%M:%S %p IST")}</div>',
         unsafe_allow_html=True
     )
-
+    
     # Background refresh logic
     if auto_refresh:
         # Main data refresh (30 seconds)
