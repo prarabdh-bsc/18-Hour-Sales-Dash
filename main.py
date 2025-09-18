@@ -875,7 +875,7 @@ def main():
             <div class="counter-container">
               <div class="counter-title">📦 Total Orders</div>
               <div class="counter-value">{main_data['total_orders']:,}</div>
-              <div class="counter-subtitle">Paid orders since 4 PM IST - 18th July</div>
+              <div class="counter-subtitle">Paid orders since 2 PM IST - 18th September</div>
             </div>
         """, unsafe_allow_html=True)
     
