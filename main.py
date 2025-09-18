@@ -83,48 +83,93 @@ st.sidebar.info(f"""
 - Top 10 Performing States
 """)
 
-st.sidebar.markdown("### ℹ️ About Metrics")
+st.sidebar.markdown("### About Metrics")
 st.sidebar.info("""
-**Main Cards:**
-• Total Orders: All **paid** orders since 4 PM IST  
-• Total Sales: Line‑item revenue from all **paid** orders  
-• Tagged Orders: **Paid** orders with campaign tag only  
-• Tagged Sales: Line‑item revenue from tagged **paid** orders  
+**Primary Metrics:**
+• Orders Placed: Paid orders with campaign tag since campaign start
+• Sale Revenue: Line-item revenue from tagged paid orders
 • Recent Carts: Abandoned carts (last 30 min)
 
-**Additional Metrics (cards below):**
-• Avg Order Value  
-• Unique Customers  
-• Campaign Conversion  
-• Orders per Customer  
+**Additional Metrics:**
+• Average Order Value
+• Unique Customers
+• Campaign Conversion Rate
+• Orders per Customer
 
-**Geographic & Customer Analysis:**
-• India Map: Order distribution by state
+**Analysis Sections:**
 • Customer Segmentation: New vs Returning
-• State Performance: Revenue & quantity by state
+• Geographic Distribution: State-wise performance
+• Product Performance: Top-selling SKUs
 """)
 
+# 1. UPDATE THE CSS STYLING (replace the existing CSS section)
 st.markdown("""
 <style>
-  .main-header { text-align:center; font-size:3rem; color:#1f77b4; margin-bottom:2rem; }
-  .counter-container {
-    background:linear-gradient(135deg,#667eea,#764ba2);
-    padding:1.5rem; border-radius:12px; text-align:center; margin:0.5rem;
+  .main-header { 
+    text-align: center; 
+    font-size: 2.5rem; 
+    color: #1f77b4; 
+    margin-bottom: 2rem; 
+    font-weight: 600;
+    letter-spacing: -0.5px;
   }
-  .counter-title { font-size:1.25rem; color:#fff; margin-bottom:0.5rem; }
-  .counter-value { font-size:2.5rem; color:#FFD700; font-weight:bold; }
-  .counter-subtitle { font-size:0.875rem; color:rgba(255,255,255,0.8); }
+  .counter-container {
+    background: linear-gradient(135deg, #2E006B, #415BFF);
+    padding: 1.5rem; 
+    border-radius: 12px; 
+    text-align: center; 
+    margin: 0.5rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+  .counter-title { 
+    font-size: 1.1rem; 
+    color: #fff; 
+    margin-bottom: 0.5rem; 
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .counter-value { 
+    font-size: 2.2rem; 
+    color: #FFD700; 
+    font-weight: 700;
+    margin: 0.5rem 0;
+  }
+  .counter-subtitle { 
+    font-size: 0.85rem; 
+    color: rgba(255,255,255,0.8); 
+    font-weight: 400;
+  }
+  .section-header {
+    font-size: 1.4rem;
+    color: #ffffff;
+    margin: 2rem 0 1rem 0;
+    text-align: left;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
   .status-indicator {
-    position:fixed; top:15px; right:60px;
-    background:#28a745; color:#fff; padding:8px 16px; border-radius:20px;
+    position: fixed; 
+    top: 15px; 
+    right: 60px;
+    background: #28a745; 
+    color: #fff; 
+    padding: 8px 16px; 
+    border-radius: 20px;
     z-index: 1000;
     font-size: 0.85rem;
     box-shadow: 0 3px 6px rgba(0,0,0,0.2);
     font-weight: 500;
   }
   .loading-indicator {
-    position:fixed; top:15px; right:60px;
-    background:#ff6b35; color:#fff; padding:8px 16px; border-radius:20px;
+    position: fixed; 
+    top: 15px; 
+    right: 60px;
+    background: #ff6b35; 
+    color: #fff; 
+    padding: 8px 16px; 
+    border-radius: 20px;
     z-index: 1001;
     animation: pulse 1.5s infinite;
     font-size: 0.85rem;
@@ -184,22 +229,28 @@ st.markdown("""
     transform: translateY(-5px);
   }
   .last-updated {
-    text-align:center; color:#666; margin-top:1rem; font-style:italic;
+    text-align: center; 
+    color: #666; 
+    margin-top: 1rem; 
+    font-style: italic;
   }
   .error-message {
-    background:#f8d7da; color:#721c24; padding:1rem; border-radius:5px;
-  }
-  .section-header {
-    font-size: 1.5rem;
-    color: #1f77b4;
-    margin: 2rem 0 1rem 0;
-    text-align: center;
-    font-weight: bold;
+    background: #f8d7da; 
+    color: #721c24; 
+    padding: 1rem; 
+    border-radius: 5px;
   }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-header">🎯 18 Hours Sale Dashboard</h1>', unsafe_allow_html=True)
+col1, col2, col3 = st.columns([1, 1, 1])  # Creates 3 equal columns
+with col2:  # Use the middle column
+    st.image("https://d3ve5430cjjm40.cloudfront.net/18Hour_Logo-01.png", width=300)
+
+# Add spacing after image
+st.markdown("<br>", unsafe_allow_html=True)
+
+st.markdown('<h1 class="main-header">Campaign Performance Dashboard</h1>', unsafe_allow_html=True)
 
 # ─── Helper Functions ────────────────────────────────────────────────────────
 
@@ -866,99 +917,79 @@ def main():
             st.rerun()
         return
 
-    # Display main metrics cards
     col1, col2, col3 = st.columns(3)
-    col4, col5 = st.columns(2)
 
     with col1:
         st.markdown(f"""
             <div class="counter-container">
-              <div class="counter-title">📦 Total Orders</div>
-              <div class="counter-value">{main_data['total_orders']:,}</div>
-              <div class="counter-subtitle">Paid orders since 2 PM IST - 18th September</div>
+            <div class="counter-title">Orders Placed</div>
+            <div class="counter-value">{main_data['tag_orders']:,}</div>
+            <div class="counter-subtitle">Campaign orders since start</div>
             </div>
         """, unsafe_allow_html=True)
-    
+
     with col2:
         st.markdown(f"""
             <div class="counter-container">
-              <div class="counter-title">💰 Total Sales</div>
-              <div class="counter-value">{format_indian_currency(main_data['total_sales'])}</div>
-              <div class="counter-subtitle">Line‑item revenue</div>
+            <div class="counter-title">Sale Revenue</div>
+            <div class="counter-value">{format_indian_currency(main_data['tag_sales'])}</div>
+            <div class="counter-subtitle">Total campaign revenue</div>
             </div>
         """, unsafe_allow_html=True)
-    
+
     with col3:
         st.markdown(f"""
             <div class="counter-container">
-              <div class="counter-title">🏷️ Tagged Orders</div>
-              <div class="counter-value">{main_data['tag_orders']:,}</div>
-              <div class="counter-subtitle">"{TARGET_TAGS[0]}" campaign</div>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown(f"""
-            <div class="counter-container">
-              <div class="counter-title">💎 Tagged Sales</div>
-              <div class="counter-value">{format_indian_currency(main_data['tag_sales'])}</div>
-              <div class="counter-subtitle">"{TARGET_TAGS[0]}" revenue</div>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    with col5:
-        st.markdown(f"""
-            <div class="counter-container">
-              <div class="counter-title">🛒 Recent Carts</div>
-              <div class="counter-value">{main_data['recent_carts']}</div>
-              <div class="counter-subtitle">Abandoned carts (30 min)</div>
+            <div class="counter-title">Recent Carts</div>
+            <div class="counter-value">{main_data['recent_carts']}</div>
+            <div class="counter-subtitle">Abandoned carts (30 min)</div>
             </div>
         """, unsafe_allow_html=True)
 
     # Additional metrics
     st.markdown("---")
-    st.markdown("### 📊 Additional Metrics")
+    st.markdown('<div class="section-header">Performance Analytics</div>', unsafe_allow_html=True)
     am1, am2, am3, am4 = st.columns(4)
     
     with am1:
         st.markdown(f"""
             <div class="counter-container">
-              <div class="counter-title">💵 Avg Order Value</div>
-              <div class="counter-value">{format_indian_currency(main_data['additional_metrics']['avg_order_value'])}</div>
-              <div class="counter-subtitle">Revenue / Order</div>
+            <div class="counter-title">Avg Order Value</div>
+            <div class="counter-value">{format_indian_currency(main_data['additional_metrics']['avg_order_value'])}</div>
+            <div class="counter-subtitle">Revenue per order</div>
             </div>
         """, unsafe_allow_html=True)
-    
+
     with am2:
         st.markdown(f"""
             <div class="counter-container">
-              <div class="counter-title">👥 Unique Customers</div>
-              <div class="counter-value">{main_data['additional_metrics']['unique_customers']:,}</div>
-              <div class="counter-subtitle">Distinct buyers</div>
+            <div class="counter-title">Unique Customers</div>
+            <div class="counter-value">{main_data['additional_metrics']['unique_customers']:,}</div>
+            <div class="counter-subtitle">Distinct buyers</div>
             </div>
         """, unsafe_allow_html=True)
-    
+
     with am3:
         st.markdown(f"""
             <div class="counter-container">
-              <div class="counter-title">🎯 Campaign Conversion</div>
-              <div class="counter-value">{main_data['conversion_rate']:.1f}%</div>
-              <div class="counter-subtitle">Tag → Order %</div>
+            <div class="counter-title">Campaign Conversion</div>
+            <div class="counter-value">{main_data['conversion_rate']:.1f}%</div>
+            <div class="counter-subtitle">Tagged order rate</div>
             </div>
         """, unsafe_allow_html=True)
-    
+
     with am4:
         st.markdown(f"""
             <div class="counter-container">
-              <div class="counter-title">🔄 Orders per Customer</div>
-              <div class="counter-value">{main_data['additional_metrics']['orders_per_customer']:.2f}</div>
-              <div class="counter-subtitle">Orders ÷ Customers</div>
+            <div class="counter-title">Orders per Customer</div>
+            <div class="counter-value">{main_data['additional_metrics']['orders_per_customer']:.2f}</div>
+            <div class="counter-subtitle">Average orders</div>
             </div>
         """, unsafe_allow_html=True)
 
     # Customer Segmentation Section
     st.markdown("---")
-    st.markdown('<div class="section-header">👥 Customer Analysis</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Customer Analysis</div>', unsafe_allow_html=True)
     
     if customer_data and customer_data.get("success"):
         cust_seg = customer_data["customer_segmentation"]
@@ -968,7 +999,7 @@ def main():
         with cust_col1:
             st.markdown(f"""
                 <div class="counter-container">
-                  <div class="counter-title">🆕 New Customers</div>
+                  <div class="counter-title">New Customers</div>
                   <div class="counter-value">{cust_seg.get('new_customers', 0):,}</div>
                   <div class="counter-subtitle">{cust_seg.get('new_customer_orders', 0):,} orders</div>
                 </div>
@@ -977,7 +1008,7 @@ def main():
         with cust_col2:
             st.markdown(f"""
                 <div class="counter-container">
-                  <div class="counter-title">🔄 Returning Customers</div>
+                  <div class="counter-title">Returning Customers</div>
                   <div class="counter-value">{cust_seg.get('returning_customers', 0):,}</div>
                   <div class="counter-subtitle">{cust_seg.get('returning_customer_orders', 0):,} orders</div>
                 </div>
@@ -990,7 +1021,7 @@ def main():
             
             st.markdown(f"""
                 <div class="counter-container">
-                  <div class="counter-title">📈 New Customer %</div>
+                  <div class="counter-title">New Customer %</div>
                   <div class="counter-value">{new_customer_percentage:.1f}%</div>
                   <div class="counter-subtitle">New vs Total</div>
                 </div>
@@ -1000,7 +1031,7 @@ def main():
 
     # Geographic Analysis Section
     st.markdown("---")
-    st.markdown('<div class="section-header">🗺️ Geographic Analysis</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Geographic Analysis</div>', unsafe_allow_html=True)
     
     # Top 10 States Performance
     if state_data and state_data.get("success"):
@@ -1028,11 +1059,11 @@ def main():
             states_df_display["Revenue"] = states_df_display["Revenue"].apply(format_indian_currency)
             states_df_display["Revenue %"] = states_df_display["Revenue %"].apply(lambda x: f"{x:.1f}%")
             
-            st.markdown("### 🏛️ Top 10 Performing States (Tagged Orders)")
+            st.markdown("### Top 10 Performing States (Tagged Orders)")
             st.dataframe(states_df_display, use_container_width=True)
             
             # India Map Visualization with Real Order Locations
-            st.markdown("### 🗺️ Order Distribution Map")
+            st.markdown("### Order Distribution Map")
             
             order_locations = state_perf.get("order_locations", [])
             
@@ -1100,7 +1131,7 @@ def main():
                 top_5_states = states_df.head(5)
                 chart_data = top_5_states.set_index("State")["Revenue"]
                 
-                st.markdown("#### 📊 Top 5 States by Revenue")
+                st.markdown("#### Top 5 States by Revenue")
                 st.bar_chart(chart_data, height=400)
         else:
             st.warning("No geographic data available yet.")
@@ -1109,7 +1140,7 @@ def main():
 
     # Top SKUs section
     st.markdown("---")
-    st.markdown('<div class="section-header">🏆 Product Performance</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Product Performance</div>', unsafe_allow_html=True)
     
     if sku_data and sku_data.get("success") and sku_data['top_skus']:
         sku_df = pd.DataFrame(sku_data['top_skus'], columns=["SKU", "Quantity Sold"])
@@ -1117,7 +1148,7 @@ def main():
         st.dataframe(sku_df, use_container_width=True)
         
         total_quantity = sum(qty for _, qty in sku_data['top_skus'])
-        st.info(f"📊 Total quantity in top 10 SKUs: {total_quantity:,} units")
+        st.info(f"Total quantity in top 10 SKUs: {total_quantity:,} units")
     elif sku_data and not sku_data.get("success"):
         st.error(f"SKU Data Error: {sku_data.get('error', 'Unknown error')}")
         if st.button("🔄 Retry SKU Data", key="retry_sku_button"):
