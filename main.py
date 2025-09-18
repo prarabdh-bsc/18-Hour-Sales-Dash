@@ -52,6 +52,12 @@ if 'customer_loading' not in st.session_state:
     st.session_state.customer_loading = False
 if 'state_loading' not in st.session_state:
     st.session_state.state_loading = False
+if 'category_data' not in st.session_state:
+    st.session_state.category_data = None
+if 'last_category_update' not in st.session_state:
+    st.session_state.last_category_update = None
+if 'category_loading' not in st.session_state:
+    st.session_state.category_loading = False
 
 st.sidebar.markdown("### Settings")
 auto_refresh = st.sidebar.checkbox("Auto-refresh enabled", value=True)
@@ -63,6 +69,7 @@ sku_refresh_interval = intervals["sku"]
 map_refresh_interval = intervals["map"]
 customer_refresh_interval = intervals["customer"]
 state_refresh_interval = intervals["state"]
+category_refresh_interval = 300  # 5 minutes
 
 st.sidebar.markdown("### Refresh Intervals")
 st.sidebar.info(f"""
@@ -318,6 +325,123 @@ def fetch_orders_metrics(query_filter: str) -> Tuple[int, float]:
         cursor = data["pageInfo"]["endCursor"]
 
     return total_count, total_revenue
+
+def fetch_category_data(start_iso: str, end_iso: str, target_tags: List[str]) -> Dict[str, Any]:
+    """Fetch category-wise sales data from tagged orders"""
+    tag_query = " OR ".join(f"tag:{t}" for t in target_tags)
+    date_query = f"created_at:>'{start_iso}' AND created_at:<='{end_iso}'"
+    paid_query = "financial_status:paid"
+    query_filter = f"({tag_query}) AND {date_query} AND {paid_query}"
+    
+    category_data = {}
+    all_skus_by_category = {}  # For dropdown functionality
+    total_revenue = 0
+    cursor = None
+    
+    while True:
+        try:
+            graphql_query = f'''
+            query ($cursor: String) {{
+              orders(
+                first: 250,
+                after: $cursor,
+                query: "{query_filter}",
+                sortKey: CREATED_AT
+              ) {{
+                pageInfo {{ hasNextPage endCursor }}
+                edges {{
+                  node {{
+                    lineItems(first: 50) {{
+                      edges {{
+                        node {{
+                          sku
+                          title
+                          quantity
+                          originalTotalSet {{ shopMoney {{ amount }} }}
+                          product {{
+                            productType
+                            vendor
+                            tags
+                          }}
+                        }}
+                      }}
+                    }}
+                  }}
+                }}
+              }}
+            }}
+            '''
+            payload = {"query": graphql_query, "variables": {"cursor": cursor}}
+            resp = requests.post(GRAPHQL_ENDPOINT, json=payload, headers=HEADERS, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()["data"]["orders"]
+
+            for edge in data["edges"]:
+                line_items = edge["node"]["lineItems"]["edges"]
+                for item_edge in line_items:
+                    item = item_edge["node"]
+                    product = item.get("product", {})
+                    
+                    sku = item.get("sku") or "UNKNOWN"
+                    title = item.get("title") or "Unknown Product"
+                    quantity = int(item.get("quantity", 1))
+                    revenue = float(item.get("originalTotalSet", {}).get("shopMoney", {}).get("amount", 0))
+                    category = product.get("productType") or "Uncategorized"
+                    
+                    total_revenue += revenue
+                    
+                    # Aggregate by category
+                    if category not in category_data:
+                        category_data[category] = {"quantity": 0, "revenue": 0.0}
+                        all_skus_by_category[category] = {}
+                    
+                    category_data[category]["quantity"] += quantity
+                    category_data[category]["revenue"] += revenue
+                    
+                    # Store SKU-level data for dropdown functionality
+                    if sku not in all_skus_by_category[category]:
+                        all_skus_by_category[category][sku] = {"title": title, "quantity": 0, "revenue": 0.0}
+                    
+                    all_skus_by_category[category][sku]["quantity"] += quantity
+                    all_skus_by_category[category][sku]["revenue"] += revenue
+
+            if not data["pageInfo"]["hasNextPage"]:
+                break
+            cursor = data["pageInfo"]["endCursor"]
+            
+        except Exception as e:
+            st.error(f"Error fetching category data: {str(e)}")
+            break
+    
+    # Calculate category shares
+    for category in category_data:
+        category_data[category]["share_percentage"] = (category_data[category]["revenue"] / total_revenue * 100) if total_revenue > 0 else 0
+    
+    return {
+        "category_data": category_data,
+        "all_skus_by_category": all_skus_by_category,
+        "total_revenue": total_revenue
+    }
+
+def fetch_category_metrics() -> Dict[str, Any]:
+    """Fetch category metrics separately"""
+    try:
+        start_iso, end_iso, now_ist = get_timeframe()
+        category_info = fetch_category_data(start_iso, end_iso, TARGET_TAGS)
+        
+        return {
+            "category_info": category_info,
+            "now_ist": now_ist,
+            "success": True,
+            "error": None
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "category_info": {},
+            "now_ist": datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
+        }
 
 def get_recent_cart_activity(start_iso: str, end_iso: str) -> int:
     """Get recent cart activity with improved error handling"""
@@ -816,6 +940,12 @@ def should_refresh_state_data() -> bool:
     time_since_update = (datetime.datetime.now() - st.session_state.last_state_update).total_seconds()
     return time_since_update >= state_refresh_interval
 
+def should_refresh_category_data() -> bool:
+    if st.session_state.last_category_update is None:
+        return True
+    time_since_update = (datetime.datetime.now() - st.session_state.last_category_update).total_seconds()
+    return time_since_update >= category_refresh_interval
+
 # ─── Main Application ─────────────────────────────────────────────────────────
 
 def main():
@@ -850,6 +980,13 @@ def main():
         st.session_state.last_state_update = datetime.datetime.now()
         st.session_state.state_loading = False
 
+    if st.session_state.category_data is None and not st.session_state.category_loading:
+        st.session_state.category_loading = True
+        st.session_state.category_data = fetch_category_metrics()
+        st.session_state.last_category_update = datetime.datetime.now()
+        st.session_state.category_loading = False
+
+
     # Show loading indicators
     loading_status = []
     if st.session_state.main_loading:
@@ -862,6 +999,8 @@ def main():
         loading_status.append("👥 Customers")
     if st.session_state.state_loading:
         loading_status.append("🏛️ States")
+    if st.session_state.category_loading:
+        loading_status.append("🏷️ Categories")
     
     if loading_status:
         st.markdown(f'<div class="loading-indicator">🔄 {", ".join(loading_status)}</div>', unsafe_allow_html=True)
@@ -901,6 +1040,13 @@ def main():
         state_next_refresh = max(0, state_refresh_interval - state_seconds_ago)
         state_next_min = state_next_refresh // 60
         tooltip_lines.append(f"🏛️ States: {state_seconds_ago}s ago | Next: {state_next_min}m")
+
+    if st.session_state.last_category_update:
+        cat_seconds_ago = int((datetime.datetime.now() - st.session_state.last_category_update).total_seconds())
+        cat_next_refresh = max(0, category_refresh_interval - cat_seconds_ago)
+        cat_next_min = cat_next_refresh // 60
+        cat_next_sec = cat_next_refresh % 60
+        tooltip_lines.append(f"🏷️ Categories: {cat_seconds_ago}s ago | Next: {cat_next_min}m {cat_next_sec}s")
     
     # Always show the info icon
     tooltip_text = "<br>".join(tooltip_lines) if tooltip_lines else "Dashboard Status Information"
@@ -1125,6 +1271,224 @@ def main():
     else:
         st.warning("SKU data loading...")
 
+    # Category Level Sales Section
+    st.markdown("---")
+    st.markdown('<div class="section-header">Category Level Sales</div>', unsafe_allow_html=True)
+
+    if st.session_state.category_data and st.session_state.category_data.get("success"):
+        category_info = st.session_state.category_data["category_info"]
+        
+        if category_info.get("category_data"):
+            # Category Overview Cards
+            st.markdown("### Category Performance Overview")
+            
+            # Prepare category data for display - FILTER OUT UNCATEGORIZED
+            categories_list = []
+            for category, data in category_info["category_data"].items():
+                # SKIP "Uncategorized" from display but keep in calculations
+                if category.lower() != "uncategorized":
+                    categories_list.append({
+                        "Category": category,
+                        "Quantity": data["quantity"],
+                        "Revenue": data["revenue"],
+                        "Sale Share %": data["share_percentage"]  # This keeps original percentages
+                    })
+            
+            # Sort by revenue descending
+            categories_df = pd.DataFrame(categories_list)
+            categories_df = categories_df.sort_values("Revenue", ascending=False)
+            categories_df.index = range(1, len(categories_df) + 1)
+            
+            # Format for display
+            categories_display = categories_df.copy()
+            categories_display["Revenue"] = categories_display["Revenue"].apply(format_indian_currency)
+            categories_display["Sale Share %"] = categories_display["Sale Share %"].apply(lambda x: f"{x:.1f}%")
+            
+            # Display category table (without Uncategorized)
+            st.dataframe(categories_display, use_container_width=True)
+            
+            # Category summary stats (excluding Uncategorized)
+            total_categories = len(categories_df)
+            top_category = categories_df.iloc[0] if not categories_df.empty else None
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Categories", total_categories)
+            with col2:
+                if top_category is not None:
+                    st.metric("Top Category", top_category["Category"])
+            with col3:
+                if top_category is not None:
+                    st.metric("Top Category Share", f"{top_category['Sale Share %']:.1f}%")
+            
+            # Category Analysis Charts
+            st.markdown("### Category Revenue Analysis")
+            
+            chart_col1, chart_col2 = st.columns(2)
+            
+            with chart_col1:
+                st.markdown("#### Revenue by Category")
+                revenue_chart = categories_df.set_index("Category")["Revenue"]
+                st.bar_chart(revenue_chart, height=400)
+            
+            with chart_col2:
+                st.markdown("#### Category Share Distribution")
+                import plotly.express as px
+                
+                # Pie chart WITH Uncategorized (for accurate data representation)
+                all_categories_list = []
+                for category, data in category_info["category_data"].items():
+                    all_categories_list.append({
+                        "Category": category,
+                        "Sale Share %": data["share_percentage"]
+                    })
+                
+                all_categories_pie = pd.DataFrame(all_categories_list)
+                
+                fig = px.pie(
+                    all_categories_pie,
+                    values="Sale Share %",
+                    names="Category",
+                    title="Category Revenue Share"
+                )
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Category Performance Scatter Plot (reverted from line chart)
+            st.markdown("### Category Performance Analysis")
+            
+            if len(categories_df) > 1:
+                # Scatter plot showing Quantity vs Revenue for categories (excluding Uncategorized from visual)
+                fig_scatter = px.scatter(
+                    categories_df,
+                    x="Quantity",
+                    y="Revenue",
+                    hover_data=["Category"],
+                    title="Category Performance: Quantity vs Revenue",
+                    labels={"Quantity": "Units Sold", "Revenue": "Revenue (₹)"}
+                )
+                
+                # Customize the scatter plot
+                fig_scatter.update_traces(
+                    marker=dict(size=12, color='rgba(102, 126, 234, 0.8)', line=dict(width=2, color='white'))
+                )
+                fig_scatter.update_layout(
+                    height=400,
+                    showlegend=False,
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)'
+                )
+                
+                st.plotly_chart(fig_scatter, use_container_width=True)
+            
+            # Interactive Category Drill-down
+            st.markdown("---")
+            st.markdown("### Category Drill-Down Analysis")
+            
+            # Category selection dropdown - EXCLUDE UNCATEGORIZED
+            available_categories = [cat for cat in category_info["all_skus_by_category"].keys() 
+                                if cat.lower() != "uncategorized"]
+            
+            if available_categories:
+                selected_category = st.selectbox(
+                    "Select a category to view top SKUs:",
+                    options=available_categories,
+                    index=0
+                )
+                
+                if selected_category and selected_category in category_info["all_skus_by_category"]:
+                    category_skus = category_info["all_skus_by_category"][selected_category]
+                    
+                    # Prepare SKU data for selected category
+                    sku_list = []
+                    for sku, data in category_skus.items():
+                        sku_list.append({
+                            "SKU": sku,
+                            "Quantity": data["quantity"],
+                            "Revenue": data["revenue"]
+                        })
+                    
+                    # Sort by revenue and take top 10
+                    sku_df = pd.DataFrame(sku_list)
+                    sku_df = sku_df.sort_values("Revenue", ascending=False).head(10)
+                    sku_df.index = range(1, len(sku_df) + 1)
+                    
+                    # Display category-specific table
+                    col1, col2 = st.columns([2, 1])
+                    
+                    with col1:
+                        st.markdown(f"#### Top 10 SKUs in {selected_category}")
+                        sku_display = sku_df.copy()
+                        sku_display["Revenue"] = sku_display["Revenue"].apply(format_indian_currency)
+                        st.dataframe(sku_display, use_container_width=True)
+                    
+                    with col2:
+                        # Category stats
+                        category_stats = category_info["category_data"][selected_category]
+                        st.markdown(f"#### {selected_category} Statistics")
+                        st.metric("Total Quantity", f"{category_stats['quantity']:,}")
+                        st.metric("Total Revenue", format_indian_currency(category_stats['revenue']))
+                        st.metric("Sale Contribution Share", f"{category_stats['share_percentage']:.1f}%")
+                    
+                    # Category-specific performance chart
+                    if len(sku_df) > 1:
+                        st.markdown(f"#### {selected_category} - SKU Performance")
+                        
+                        # Scatter plot for SKUs in selected category (reverted from line chart)
+                        fig_sku = px.scatter(
+                            sku_df,
+                            x="Quantity",
+                            y="Revenue",
+                            hover_data=["SKU"],
+                            title=f"SKU Performance in {selected_category}",
+                            labels={"Quantity": "Units Sold", "Revenue": "Revenue (₹)"}
+                        )
+                        
+                        fig_sku.update_traces(
+                            marker=dict(size=12, color='rgba(255, 99, 132, 0.8)', line=dict(width=2, color='white'))
+                        )
+                        
+                        fig_sku.update_layout(
+                            height=400,
+                            showlegend=False,
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)'
+                        )
+                        
+                        st.plotly_chart(fig_sku, use_container_width=True)
+            else:
+                st.warning("No categorized products found. All products are marked as 'Uncategorized'.")
+        
+        else:
+            st.warning("No category data available yet.")
+
+    elif st.session_state.category_data and not st.session_state.category_data.get("success"):
+        st.error(f"Category Data Error: {st.session_state.category_data.get('error', 'Unknown error')}")
+        if st.button("Retry Category Data", key="retry_category_button"):
+            st.session_state.category_data = None
+            st.session_state.last_category_update = None
+            st.rerun()
+    else:
+        st.warning("Category data loading...")
+
+    if not categories_df.empty:
+        visible_revenue = categories_df['Revenue'].sum()
+        total_all_revenue = category_info.get('total_revenue', 0)
+        uncategorized_revenue = total_all_revenue - visible_revenue
+        
+        st.markdown("---")
+        st.markdown("#### Revenue Distribution")
+        
+        dist_col1, dist_col2, dist_col3 = st.columns(3)
+        with dist_col1:
+            st.metric("Categorized Revenue", format_indian_currency(visible_revenue))
+        with dist_col2:
+            st.metric("Uncategorized Revenue", format_indian_currency(uncategorized_revenue))
+        with dist_col3:
+            categorized_percentage = (visible_revenue / total_all_revenue * 100) if total_all_revenue > 0 else 0
+            st.metric("Categorized %", f"{categorized_percentage:.1f}%")
+
+
     # Geographic Analysis Section
     st.markdown("---")
     st.markdown('<div class="section-header">Geographic Analysis</div>', unsafe_allow_html=True)
@@ -1303,6 +1667,19 @@ def main():
                 finally:
                     st.session_state.state_loading = False
             update_state_data()
+        
+        if should_refresh_category_data() and not st.session_state.category_loading:
+            def update_category_data():
+                st.session_state.category_loading = True
+                try:
+                    new_category_data = fetch_category_metrics()
+                    st.session_state.category_data = new_category_data
+                    st.session_state.last_category_update = datetime.datetime.now()
+                except Exception:
+                    pass
+                finally:
+                    st.session_state.category_loading = False
+            update_category_data()
     
     # Gentle rerun for updates
     if auto_refresh:
